@@ -45,7 +45,7 @@ func (bs *BitCask) createFile() (*os.File, error) {
 
 func (bs *BitCask) Set(key string, value []byte) error {
 
-	offset, err := bs.currentdatafile.Seek(0, io.SeekCurrent)
+	offset, err := bs.currentdatafile.Seek(0, io.SeekEnd)
 	valueOffset := offset + 8 + 8 + 8 + int64(len(key))
 	if err != nil {
 		return err
@@ -102,14 +102,48 @@ func (bs *BitCask) Get(key string) (value []byte, err error) {
 
 	buf := make([]byte, size)
 
-	n, err := file.Read(buf)
-
+	_, err = io.ReadFull(file, buf)
 	if err != nil {
 		return nil, err
 	}
-	value = buf[:n]
 
-	return value, nil
+	return buf, nil
+
+}
+
+func (bs *BitCask) rebuildKeyDir(fileID int64, file *os.File) error {
+	file.Seek(0, io.SeekStart)
+
+	for {
+		offset, _ := file.Seek(0, io.SeekCurrent)
+
+		var timestamp int64
+		var valueSize int64
+		var keySize int64
+		err := binary.Read(file, binary.BigEndian, &timestamp)
+		if err == io.EOF {
+			break
+
+		}
+		err = binary.Read(file, binary.BigEndian, &keySize)
+		err = binary.Read(file, binary.BigEndian, &valueSize)
+
+		key := make([]byte, keySize)
+		io.ReadFull(file, key)
+
+		file.Seek(valueSize, io.SeekCurrent)
+
+		valueOffset := offset + 8 + 8 + 8 + int64(keySize)
+
+		bs.keyDir[string(key)] = KeyDirEntry{
+			fileID:    fileID,
+			offset:    valueOffset,
+			valueSize: valueSize,
+		}
+
+	}
+
+	return nil
 
 }
 
@@ -119,9 +153,37 @@ func Open() (*BitCask, error) {
 		keyDir:        make(map[string]KeyDirEntry),
 	}
 
-	_, err := bc.createFile()
+	files, _ := os.ReadDir("./")
+	var lastID int64 = -1
 
-	return bc, err
+	for _, f := range files {
+		var id int64
+
+		_, err := fmt.Sscan(f.Name(), "%d.db", &id)
+		if err == nil {
+			file, _ := os.OpenFile(f.Name(), os.O_RDWR, 0644)
+			bc.pastDataFiles[id] = file
+
+			if id > lastID {
+				lastID = id
+			}
+
+			bc.rebuildKeyDir(id, file)
+		}
+
+	}
+
+	bc.currentFileID = lastID
+	if lastID == -1 {
+		bc.currentFileID = 0
+		bc.createFile()
+	} else {
+		bc.currentFileID = lastID
+		bc.currentdatafile = bc.pastDataFiles[lastID]
+
+	}
+
+	return bc, nil
 }
 
 func main() {
