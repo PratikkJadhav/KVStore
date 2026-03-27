@@ -38,6 +38,7 @@ func (bs *BitCask) createFile() (*os.File, error) {
 	filename := fmt.Sprintf("%d.db", bs.currentFileID)
 
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+
 	bs.currentdatafile = file
 
 	return file, err
@@ -93,6 +94,7 @@ func (bs *BitCask) Get(key string) (value []byte, err error) {
 
 	filename := fmt.Sprintf("%d.db", fileID)
 	file, err := os.OpenFile(filename, os.O_RDONLY, 0644)
+	defer file.Close()
 
 	if err != nil {
 		return nil, err
@@ -111,6 +113,44 @@ func (bs *BitCask) Get(key string) (value []byte, err error) {
 
 }
 
+func (bs *BitCask) Delete(key string) error {
+	file := bs.currentdatafile
+	_, err := file.Seek(0, io.SeekEnd)
+
+	if err != nil {
+		return err
+	}
+	var valueSize = 0
+	buf := new(bytes.Buffer)
+	timestamp := time.Now().UnixMilli()
+	binary.Write(buf, binary.BigEndian, timestamp)
+	binary.Write(buf, binary.BigEndian, int64(len(key)))
+	binary.Write(buf, binary.BigEndian, int64(valueSize))
+	buf.Write([]byte(key))
+
+	_, exists := bs.keyDir[key]
+	if !exists {
+		fmt.Println("Key does not exists")
+		return nil
+	}
+
+	_, err = file.Write(buf.Bytes())
+
+	if err != nil {
+		return err
+	}
+
+	delete(bs.keyDir, key)
+
+	info, _ := bs.currentdatafile.Stat()
+	if info.Size() > int64(threshold) {
+		bs.pastDataFiles[bs.currentFileID] = bs.currentdatafile
+		bs.createFile()
+	}
+
+	return nil
+}
+
 func (bs *BitCask) rebuildKeyDir(fileID int64, file *os.File) error {
 	file.Seek(0, io.SeekStart)
 
@@ -123,22 +163,32 @@ func (bs *BitCask) rebuildKeyDir(fileID int64, file *os.File) error {
 		err := binary.Read(file, binary.BigEndian, &timestamp)
 		if err == io.EOF {
 			break
-
 		}
 		err = binary.Read(file, binary.BigEndian, &keySize)
+		if err == io.EOF {
+			break
+		}
 		err = binary.Read(file, binary.BigEndian, &valueSize)
+		if err == io.EOF {
+			break
+		}
 
 		key := make([]byte, keySize)
+
 		io.ReadFull(file, key)
 
 		file.Seek(valueSize, io.SeekCurrent)
 
 		valueOffset := offset + 8 + 8 + 8 + int64(keySize)
 
-		bs.keyDir[string(key)] = KeyDirEntry{
-			fileID:    fileID,
-			offset:    valueOffset,
-			valueSize: valueSize,
+		if valueSize == 0 {
+			delete(bs.keyDir, string(key))
+		} else {
+			bs.keyDir[string(key)] = KeyDirEntry{
+				fileID:    fileID,
+				offset:    valueOffset,
+				valueSize: valueSize,
+			}
 		}
 
 	}
@@ -159,9 +209,10 @@ func Open() (*BitCask, error) {
 	for _, f := range files {
 		var id int64
 
-		_, err := fmt.Sscan(f.Name(), "%d.db", &id)
+		_, err := fmt.Sscanf(f.Name(), "%d.db", &id)
 		if err == nil {
 			file, _ := os.OpenFile(f.Name(), os.O_RDWR, 0644)
+
 			bc.pastDataFiles[id] = file
 
 			if id > lastID {
@@ -210,6 +261,8 @@ func main() {
 		} else if cmd == "SET" {
 			resp := bc.Set(parts[1], []byte(parts[2]))
 			fmt.Println(resp)
+		} else if cmd == "DELETE" {
+			_ = bc.Delete(parts[1])
 		}
 	}
 }
