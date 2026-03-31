@@ -61,3 +61,24 @@ func TestBitCaskLifecycle(t *testing.T) {
 
 	t.Log("SUCCESS: All tests passed! File rotation, compaction, and tombstones are working perfectly.")
 }
+
+func BenchmarkSet(b *testing.B) {
+	bc, _ := Open()
+	val := []byte("X")
+	b.SetBytes(int64(len(val) + 8 + 8 + 8 + 8)) // tracks MB/s (value + headers + key)
+
+	b.ResetTimer() // Start the clock
+	for i := 0; i < b.N; i++ {
+		bc.Set("test_key", val)
+	}
+}
+
+func BenchmarkGet(b *testing.B) {
+	bc, _ := Open()
+	bc.Set("test_key", []byte("X"))
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bc.Get("test_key")
+	}
+}
