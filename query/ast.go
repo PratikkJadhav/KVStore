@@ -30,3 +30,34 @@ type Token struct {
 	Type    TokenType
 	Literal string
 }
+
+type Statement interface {
+	statementNode()
+}
+
+type InsertStmt struct {
+	Table   string
+	Columns []string
+	Values  []string
+}
+
+type SelectStmt struct {
+	Table string
+	ID    *string
+}
+
+type DeleteStmt struct {
+	Table string
+	ID    string
+}
+
+type UpsertStmt struct {
+	Table   string
+	Columns []string
+	Values  []string
+}
+
+func (i *InsertStmt) statementNode() {}
+func (i *SelectStmt) statementNode() {}
+func (i *DeleteStmt) statementNode() {}
+func (i *UpsertStmt) statementNode() {}
