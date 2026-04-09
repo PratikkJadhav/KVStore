@@ -33,20 +33,17 @@ func (e *Executor) executeInsert(stmt *InsertStmt) (string, error) {
 
 	key := fmt.Sprintf("%s:%s", stmt.Table, id)
 
-	// 2. Check if it already exists
 	_, err := e.db.Get(key)
 	if err == nil {
 		return "", fmt.Errorf("row with id '%s' already exists in table '%s'. Use UPSERT to modify", id, stmt.Table)
 	}
 
-	// 3. Zip columns and values together
 	data := make(map[string]string)
 	for i, col := range stmt.Columns {
 		data[col] = stmt.Values[i]
 	}
-	data["id"] = id // Ensure ID is always saved in the JSON
+	data["id"] = id
 
-	// 4. Encode and save
 	bytes, err := encode(data)
 	if err != nil {
 		return "", err
